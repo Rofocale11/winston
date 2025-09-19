@@ -6,7 +6,7 @@ permissions:
 on:
   push:
     branches:
-      - alpha
+      - main
   workflow_dispatch:
 
 jobs:
