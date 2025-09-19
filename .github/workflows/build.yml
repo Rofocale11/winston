@@ -1,0 +1,106 @@
+name: Build winston
+permissions:
+    contents: write
+    pull-requests: write
+
+on:
+  push:
+    branches:
+      - alpha
+  workflow_dispatch:
+
+jobs:
+  Build:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+          
+      - name: Install Metal toolchain
+        run: |
+          sudo xcodebuild -downloadPlatform iOS
+          sudo xcodebuild -downloadComponent MetalToolchain
+
+      - name: Build Xcode project
+        run: |
+          # Build the project
+          xcodebuild \
+            -scheme "winston" \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build 2>&1 | tee build.log
+        continue-on-error: true
+
+      - name: Create IPA manually
+        run: |
+          # Find the built app
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "winston.app" -path "*/Build/Products/*" | head -1)
+          echo "Found app at: $APP_PATH"
+          
+          if [ -n "$APP_PATH" ]; then
+            # Create IPA directory
+            mkdir -p winston-ipa
+            
+            # Create Payload directory
+            mkdir -p winston-ipa/Payload
+            
+            # Copy the app to Payload
+            cp -R "$APP_PATH" winston-ipa/Payload/
+            
+            # Create IPA file
+            cd winston-ipa
+            zip -r winston.ipa Payload/
+            cd ..
+            
+            echo "IPA created successfully"
+            ls -la winston-ipa/
+          else
+            echo "App bundle not found"
+            exit 1
+          fi
+
+      - name: Verify IPA creation
+        run: |
+          echo "=== IPA CREATION STATUS ==="
+          if [ -f "winston-ipa/winston.ipa" ]; then
+            echo "✅ IPA file created successfully"
+            ls -la winston-ipa/
+          else
+            echo "❌ IPA file not found"
+            echo "Contents of winston-ipa directory:"
+            ls -la winston-ipa/ || echo "Directory does not exist"
+          fi
+
+      - name: Find build output location
+        run: |
+          echo "=== BUILD OUTPUT LOCATION ==="
+          find ~/Library/Developer/Xcode/DerivedData -name "winston*" -type d 2>/dev/null | head -5
+          echo ""
+          echo "=== APP BUNDLE LOCATION ==="
+          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -path "*/winston*" 2>/dev/null | head -5
+
+      - name: Display build errors
+        run: |
+          echo "=== BUILD ERRORS ==="
+          if [ -f build.log ]; then
+            # Extract and display compilation errors
+            grep -A 5 -B 5 "error:" build.log || echo "No specific error messages found"
+            echo ""
+            echo "=== FULL BUILD LOG ==="
+            cat build.log
+          else
+            echo "Build log not found"
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: winston-build
+          path: |
+            winston-ipa/winston.ipa
+            build.log
+          retention-days: 7
